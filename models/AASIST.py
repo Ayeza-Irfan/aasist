@@ -13,6 +13,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from models.aux_rawnet import AuxiliaryRawNet
+
+
 
 class GraphAttentionLayer(nn.Module):
     def __init__(self, in_dim, out_dim, **kwargs):
@@ -476,6 +479,17 @@ class Model(nn.Module):
         pool_ratios = d_args["pool_ratios"]
         temperatures = d_args["temperatures"]
 
+
+                # --------- Auxiliary RawNet config ----------
+        # allow config to override embedding size; default 128
+        aux_emb_dim = d_args.get("aux_emb_dim", 128)
+        self.aux_emb_dim = aux_emb_dim
+        # create auxiliary RawNet encoder
+        self.aux_rawnet = AuxiliaryRawNet(embedding_dim=aux_emb_dim)
+
+
+
+
         self.conv_time = CONV(out_channels=filts[0],
                               kernel_size=d_args["first_conv"],
                               in_channels=1)
@@ -523,9 +537,16 @@ class Model(nn.Module):
         self.pool_hS2 = GraphPool(pool_ratios[2], gat_dims[1], 0.3)
         self.pool_hT2 = GraphPool(pool_ratios[2], gat_dims[1], 0.3)
 
-        self.out_layer = nn.Linear(5 * gat_dims[1], 2)
+                # main embedding dim (AASIST existing): 5 * gat_dims[1]
+        main_emb_dim = 5 * gat_dims[1]
+        # fused classifier takes both main embedding and aux embedding
+        self.out_layer = nn.Linear(main_emb_dim + aux_emb_dim, 2)
+
 
     def forward(self, x, Freq_aug=False):
+                # compute auxiliary rawnet embedding from raw waveform
+        # input x shape is (B, N)
+        aux_emb = self.aux_rawnet(x)  # (B, aux_emb_dim)
 
         x = x.unsqueeze(1)
         x = self.conv_time(x, mask=Freq_aug)
@@ -602,6 +623,14 @@ class Model(nn.Module):
             [T_max, T_avg, S_max, S_avg, master.squeeze(1)], dim=1)
 
         last_hidden = self.drop(last_hidden)
-        output = self.out_layer(last_hidden)
+        # fuse auxiliary embedding
+        # ensure aux_emb has same dtype/device
+        if aux_emb.dtype != last_hidden.dtype:
+            aux_emb = aux_emb.type_as(last_hidden)
+        if aux_emb.device != last_hidden.device:
+            aux_emb = aux_emb.to(last_hidden.device)
+        fused = torch.cat([last_hidden, aux_emb], dim=1)
+        output = self.out_layer(fused)
+
 
         return last_hidden, output
