@@ -59,9 +59,7 @@ def main(args: argparse.Namespace) -> None:
                       "ASVspoof2019_{}_cm_protocols/{}.cm.dev.trl.txt".format(
                           track, prefix_2019))
     eval_trial_path = (
-        database_path /
-        "ASVspoof2019_{}_cm_protocols/{}.cm.eval.trl.txt".format(
-            track, prefix_2019))
+        Path("/kaggle/working/formatted_eval_protocol.txt"))
 
     # define model related paths
     model_tag = "{}_{}_ep{}_bs{}".format(
@@ -132,10 +130,13 @@ def main(args: argparse.Namespace) -> None:
         running_loss = train_epoch(trn_loader, model, optimizer, device,
                                    scheduler, config)
         produce_evaluation_file(dev_loader, model, device,
-                                metric_path/"dev_score.txt", dev_trial_path)
+                        metric_path/"dev_score.txt", dev_trial_path)
+
+        asv_score_path_2019 = "/kaggle/input/asvpoof-2019-dataset/LA/LA/ASVspoof2019_LA_asv_scores/ASVspoof2019.LA.asv.dev.gi.trl.scores.txt"
+
         dev_eer, dev_tdcf = calculate_tDCF_EER(
             cm_scores_file=metric_path/"dev_score.txt",
-            asv_score_file=database_path/config["asv_score_path"],
+            asv_score_file=asv_score_path_2019,  # Use the 2019 path here
             output_file=metric_path/"dev_t-DCF_EER_{}epo.txt".format(epoch),
             printout=False)
         print("DONE.\nLoss:{:.5f}, dev_eer: {:.3f}, dev_tdcf:{:.5f}".format(
@@ -188,9 +189,8 @@ def main(args: argparse.Namespace) -> None:
     produce_evaluation_file(eval_loader, model, device, eval_score_path,
                             eval_trial_path)
     eval_eer, eval_tdcf = calculate_tDCF_EER(cm_scores_file=eval_score_path,
-                                             asv_score_file=database_path /
-                                             config["asv_score_path"],
-                                             output_file=model_tag / "t-DCF_EER.txt")
+                                         asv_score_file=asv_score_path_2019,
+                                         output_file=model_tag / "t-DCF_EER.txt")
     f_log = open(model_tag / "metric_log.txt", "a")
     f_log.write("=" * 5 + "\n")
     f_log.write("EER: {:.3f}, min t-DCF: {:.5f}".format(eval_eer, eval_tdcf))
@@ -230,18 +230,24 @@ def get_loader(
 
     trn_database_path = database_path / "ASVspoof2019_{}_train/".format(track)
     dev_database_path = database_path / "ASVspoof2019_{}_dev/".format(track)
-    eval_database_path = database_path / "ASVspoof2019_{}_eval/".format(track)
+    # === START OF YOUR EDITS ===
 
+# This path points to the 2021 evaluation audio folder
+    eval_database_path = Path("/kaggle/input/avsspoof-2021/ASVspoof2021_LA_eval/ASVspoof2021_LA_eval/")
+
+# These paths correctly use the "database_path" from your config (for 2019 data)
     trn_list_path = (database_path /
-                     "ASVspoof2019_{}_cm_protocols/{}.cm.train.trn.txt".format(
-                         track, prefix_2019))
+                 "ASVspoof2019_{}_cm_protocols/{}.cm.train.trn.txt".format(
+                     track, prefix_2019))
     dev_trial_path = (database_path /
-                      "ASVspoof2019_{}_cm_protocols/{}.cm.dev.trl.txt".format(
-                          track, prefix_2019))
+                  "ASVspoof2019_{}_cm_protocols/{}.cm.dev.trl.txt".format(
+                      track, prefix_2019))
+
+# This path points to the 2021 evaluation protocol file
     eval_trial_path = (
-        database_path /
-        "ASVspoof2019_{}_cm_protocols/{}.cm.eval.trl.txt".format(
-            track, prefix_2019))
+        Path("/kaggle/working/formatted_eval_protocol.txt"))
+
+# === END OF YOUR EDITS ===
 
     d_label_trn, file_train = genSpoof_list(dir_meta=trn_list_path,
                                             is_train=True,
@@ -312,6 +318,7 @@ def produce_evaluation_file(
     assert len(trial_lines) == len(fname_list) == len(score_list)
     with open(save_path, "w") as fh:
         for fn, sco, trl in zip(fname_list, score_list, trial_lines):
+            # All files (dev and eval) now have 5 columns
             _, utt_id, _, src, key = trl.strip().split(' ')
             assert fn == utt_id
             fh.write("{} {} {} {}\n".format(utt_id, src, key, sco))
